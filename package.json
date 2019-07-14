@@ -1,0 +1,23 @@
+{
+  "name": "node-casbin-redis-adapter",
+  "version": "1.0.0",
+  "description": "",
+  "main": "src/adapter.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "node",
+    "casbin",
+    "redis",
+    "node-casbin",
+    "redis-adapter",
+    "casbin-redis"
+  ],
+  "author": "Nanda Kishor Jeripothula",
+  "license": "MIT",
+  "dependencies": {
+    "casbin": "^3.0.3",
+    "redis": "^2.8.0"
+  }
+}

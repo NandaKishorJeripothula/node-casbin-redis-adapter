@@ -20,13 +20,13 @@ That is all what required for integrating the adapter into casbin.
 
 ## Configuration
 
-adapter takes options the following options
+```NodeRedisAdapter.newAdapter()``` takes the following paramters as an object to establish the connection with redis-server
 ```javascript
 host		:String
 port		:Number
+password	:String
 // if remote server, it needs url
 url			:String 
-password	:String
 db			:Number
 //If the connection is SSL Encrypted then TCL object
 tcl			:Object

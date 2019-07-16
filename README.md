@@ -11,7 +11,7 @@ import { NodeRedisAdapter }from './adapter' ;
 import { join } from 'path';
 
 const model=join(__dirname, 'casbin_conf/model.conf');
-const adapter= await NodeRedisAdapter.newAdapter({host:"127.0.0.1",port:6379})
+const adapter= await NodeRedisAdapter.newAdapter({host:"127.0.0.1",port:6379});
 const enforcer = await newEnforcer(model,adapter);
  
  ```

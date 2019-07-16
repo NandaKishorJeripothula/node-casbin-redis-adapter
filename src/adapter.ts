@@ -1,6 +1,5 @@
 import { Helper } from 'casbin';
 import * as redis from 'redis';
-import { async } from 'rxjs/internal/scheduler/async';
 class Line {
     p_type: String;
     v0: String;
@@ -12,6 +11,7 @@ class Line {
 }
 export class NodeRedisAdapter {
     private redisInstance = null;
+    private policies= null;
     /**
      * 
      * Helper Methods
@@ -91,6 +91,38 @@ export class NodeRedisAdapter {
         }
         Helper.loadPolicyLine(lineText, model);
     }
+    storePolicies(policies){
+        new Promise((resolve, reject) => {
+            this.redisInstance.DEL("policies");
+            this.redisInstance.SET("policies", JSON.stringify(policies), (err, reply) => {
+                if (err) {
+                    console.error("Redis Save error",err);
+                    reject;
+                } else {
+                    console.log(reply);
+                    resolve;
+                }
+            })
+        });
+    }
+
+    reducePolicies(policies,ptype,rule){
+        let i=rule.length;
+        let policyIndex = policies.fieldIndex((policy)=>{
+            let flag= false;
+            flag =  policy.p_type    === ptype  ? true  : false;
+            flag =  i>5 && policy.v5 === rule[5] ? true : false;
+            flag =  i>4 && policy.v4 === rule[4] ? true : false ;
+            flag =  i>3 && policy.v3 === rule[3] ? true : false ;
+            flag =  i>2 && policy.v2 === rule[2] ? true : false ;
+            flag =  i>1 && policy.v0 === rule[1] ? true : false ; 
+            return flag;
+        });
+        if(policyIndex!==-1){
+            return policies.splice(policyIndex,1);
+        }
+        return [];
+    }
     constructor(options: Object) {
         this.createClient(options);
     }
@@ -135,6 +167,7 @@ export class NodeRedisAdapter {
             }
             if (!err) {
                 policies=JSON.parse(policies);
+                this.policies=policies;//For add and remove policies methods
                 console.log(policies, typeof policies);
                 policies.forEach(function (policy,index) {
                     console.log(policy)
@@ -163,27 +196,25 @@ export class NodeRedisAdapter {
                 policies.push(line);
             }
         }
-        const policy = JSON.stringify(policies);
-        new Promise((resolve, reject) => {
-            this.redisInstance.DEL("policies");
-            this.redisInstance.HMSET("policies", policies, (err, reply) => {
-                if (err) {
-                    console.error(err);
-                    reject;
-                } else {
-                    console.log(reply);
-                    resolve;
-                }
-            })
-        });
+        this.storePolicies(policies);
     }
     async addPolicy(sec, ptype, rule) {
-        return new Error("not implemented");
+        const line = this.savePolicyLine(ptype, rule);
+        this.policies.push(line);
+        this.storePolicies(this.policies);
+        //reSave the policies
     }
 
     async removePolicy(sec, ptype, rule) {
-        
-        return new Error("not implemented");
+        let result=this.reducePolicies(this.policies, ptype,rule);
+        //the modified policies
+        if(result.length){ //if length>0
+            this.policies=result;
+            //Store in Redis
+            this.storePolicies(this.policies);
+        }else{
+            console.log("No Policy found");
+        }
     }
 
     async removeFilteredPolicy(sec, ptype, fieldIndex, ...fieldValues) {

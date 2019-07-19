@@ -18,26 +18,27 @@ export class BasicAuthorizer {
         const { req, enforcer } = this;
         const { originalUrl: path, method } = req;
         const userRole = this.getUserRole();
+        console.log({ userRole, path, method })
         return enforcer.enforce(userRole, path, method);
     }
 }
 
 // the authorizer middleware
-export function authz(newEnforcer: () => Promise<Enforcer>) {
+export function authz(enforcer: Enforcer) {
     return async (req, res, next) => {
-        const enforcer = await newEnforcer();
+
         if (!req.headers.user) {// user sample
-            req.headers.user = 'admin';
+            req.headers.user = 'notadmin';
         }
 
-        if(!(enforcer instanceof Enforcer)) {
-            res.status(500).json({500: 'Invalid enforcer'});
+        if (!(enforcer instanceof Enforcer)) {
+            res.status(500).json({ 500: 'Invalid enforcer' });
             return;
         }
 
         const authorizer = new BasicAuthorizer(req, enforcer);
-        if(!authorizer.checkPermission()) {
-            res.status(403).json({403: 'Forbidden'});
+        if (!authorizer.checkPermission()) {
+            res.status(403).json({ 403: 'Forbidden' });
             return;
         }
 

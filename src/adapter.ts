@@ -1,46 +1,45 @@
 import { Helper } from 'casbin';
 import * as redis from 'redis';
+import { promisify } from 'util';
+
+interface IConnectionOptions {
+    host: string;
+    port: number;
+}
 class Line {
-    p_type: String;
-    v0: String;
-    v1: String;
-    v2: String;
-    v3: String;
-    v4: String;
-    v5: String;
+    p_type: string;
+    v0: string;
+    v1: string;
+    v2: string;
+    v3: string;
+    v4: string;
+    v5: string;
 }
 export class NodeRedisAdapter {
     private redisInstance = null;
     private policies = null;
+    private deliveredOptions = {
+        retry_strategy(options) {
+            if (options.error && options.error.code === 'ECONNREFUSED') {
+                return new Error('The server refused the connection');
+            }
+            if (options.total_retry_time > 1000 * 60 * 60) {
+                return new Error('Retry time exhausted');
+            }
+            if (options.attempt > 10) {
+                return undefined;
+            }
+            // reconnect after
+            return Math.min(options.attempt * 100, 300);
+        },
+    };
+
     /**
-     * 
      * Helper Methods
      */
-    createClient(options) {
-        this.redisInstance = redis.createClient(
-            {
-                ...options,
-                retry_strategy: function (options) {
-                    if (options.error && options.error.code === "ECONNREFUSED") {
-                        // console.error("The server refused the connection");
-                        return new Error("The server refused the connection");
-                    }
-                    if (options.total_retry_time > 1000 * 60 * 60) {
-                        // console.error("Retry time exhausted");
-                        return new Error("Retry time exhausted");
-                    }
-                    if (options.attempt > 10) {
-                        // console.log("End reconnecting with built in error");
-                        return undefined;
-                    }
-                    // reconnect after
-                    return Math.min(options.attempt * 100, 300);
-                }
-            }
-        );
-    }
+
     savePolicyLine(ptype, rule) {
-        let line = new Line();
+        const line = new Line();
         line.p_type = ptype;
         if (rule.length > 0) {
             line.v0 = rule[0];
@@ -65,7 +64,6 @@ export class NodeRedisAdapter {
         if (rule.length > 5) {
             line.v5 = rule[5];
         }
-        console.log("Generated Policy Line \n", line);
         return line;
     }
     loadPolicyLine(line, model) {
@@ -91,18 +89,18 @@ export class NodeRedisAdapter {
         }
         Helper.loadPolicyLine(lineText, model);
     }
+
     storePolicies(policies) {
-        new Promise((resolve, reject) => {
-            this.redisInstance.DEL("policies");
-            this.redisInstance.SET("policies", JSON.stringify(policies), (err, reply) => {
+        return new Promise((resolve, reject) => {
+            console.log({ r: this.redisInstance });
+            this.redisInstance.del('policies');
+            this.redisInstance.set('policies', JSON.stringify(policies), (err, reply) => {
                 if (err) {
-                    console.error("Redis Save error", err);
-                    reject;
+                    reject(err);
                 } else {
-                    console.log(reply);
-                    resolve;
+                    resolve(reply);
                 }
-            })
+            });
         });
     }
 
@@ -123,20 +121,28 @@ export class NodeRedisAdapter {
         }
         return [];
     }
-    constructor(options: Object) {
-        this.createClient(options);
+
+    constructor(options: IConnectionOptions) {
+        this.redisInstance = redis.createClient(
+            {
+                ...options,
+                ...this.deliveredOptions,
+            },
+        );
     }
-    static async newAdapter(options: Object) {
+
+    static async newAdapter(options: IConnectionOptions) {
         const adapter = new NodeRedisAdapter(options);
         await new Promise(resolve => adapter.redisInstance.on('connect', resolve));
         return adapter;
     }
+
     /**
      * Adapter Methods
      */
 
     loadPolicy(model) {
-        this.redisInstance.GET("policies", (err, policies) => {
+        this.redisInstance.get("policies", (err, policies) => {
             var AdapterRef = this;
             console.log("Loading Policies...\n", policies);
             if (!policies) {
@@ -178,6 +184,7 @@ export class NodeRedisAdapter {
             }
         });
     }
+
     async savePolicy(model) {
         const policyRuleAST = model.model.get("p");
         const groupingPolicyAST = model.model.get("g");

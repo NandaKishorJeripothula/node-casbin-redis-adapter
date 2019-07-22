@@ -1,46 +1,45 @@
 import { Helper } from 'casbin';
 import * as redis from 'redis';
+import { promisify } from 'util';
+
+interface IConnectionOptions {
+    host: string;
+    port: number;
+}
 class Line {
-    p_type: String;
-    v0: String;
-    v1: String;
-    v2: String;
-    v3: String;
-    v4: String;
-    v5: String;
+    p_type: string;
+    v0: string;
+    v1: string;
+    v2: string;
+    v3: string;
+    v4: string;
+    v5: string;
 }
 export class NodeRedisAdapter {
     private redisInstance = null;
-    private policies= null;
+    private policies = null;
+    private deliveredOptions = {
+        retry_strategy(options) {
+            if (options.error && options.error.code === 'ECONNREFUSED') {
+                return new Error('The server refused the connection');
+            }
+            if (options.total_retry_time > 1000 * 60 * 60) {
+                return new Error('Retry time exhausted');
+            }
+            if (options.attempt > 10) {
+                return undefined;
+            }
+            // reconnect after
+            return Math.min(options.attempt * 100, 300);
+        },
+    };
+
     /**
-     * 
      * Helper Methods
      */
-    createClient(options) {
-        this.redisInstance = redis.createClient(
-            {
-                ...options,
-                retry_strategy: function (options) {
-                    if (options.error && options.error.code === "ECONNREFUSED") {
-                        console.error("The server refused the connection");
-                        return new Error("The server refused the connection");
-                    }
-                    if (options.total_retry_time > 1000 * 60 * 60) {
-                        console.error("Retry time exhausted");
-                        return new Error("Retry time exhausted");
-                    }
-                    if (options.attempt > 10) {
-                        console.log("End reconnecting with built in error");
-                        return undefined;
-                    }
-                    // reconnect after
-                    return Math.min(options.attempt * 100, 300);
-                }
-            }
-        );
-    }
+
     savePolicyLine(ptype, rule) {
-        let line = new Line();
+        const line = new Line();
         line.p_type = ptype;
         if (rule.length > 0) {
             line.v0 = rule[0];
@@ -65,7 +64,6 @@ export class NodeRedisAdapter {
         if (rule.length > 5) {
             line.v5 = rule[5];
         }
-        console.log("Generated Policy Line \n", line);
         return line;
     }
     loadPolicyLine(line, model) {
@@ -91,53 +89,61 @@ export class NodeRedisAdapter {
         }
         Helper.loadPolicyLine(lineText, model);
     }
-    storePolicies(policies){
-        new Promise((resolve, reject) => {
-            this.redisInstance.DEL("policies");
-            this.redisInstance.SET("policies", JSON.stringify(policies), (err, reply) => {
+
+    storePolicies(policies) {
+        return new Promise((resolve, reject) => {
+            console.log({ r: this.redisInstance });
+            this.redisInstance.del('policies');
+            this.redisInstance.set('policies', JSON.stringify(policies), (err, reply) => {
                 if (err) {
-                    console.error("Redis Save error",err);
-                    reject;
+                    reject(err);
                 } else {
-                    console.log(reply);
-                    resolve;
+                    resolve(reply);
                 }
-            })
+            });
         });
     }
 
-    reducePolicies(policies,ptype,rule){
-        let i=rule.length;
-        let policyIndex = policies.fieldIndex((policy)=>{
-            let flag= false;
-            flag =  policy.p_type    === ptype  ? true  : false;
-            flag =  i>5 && policy.v5 === rule[5] ? true : false;
-            flag =  i>4 && policy.v4 === rule[4] ? true : false ;
-            flag =  i>3 && policy.v3 === rule[3] ? true : false ;
-            flag =  i>2 && policy.v2 === rule[2] ? true : false ;
-            flag =  i>1 && policy.v0 === rule[1] ? true : false ; 
+    reducePolicies(policies, ptype, rule) {
+        let i = rule.length;
+        let policyIndex = policies.fieldIndex((policy) => {
+            let flag = false;
+            flag = policy.p_type === ptype ? true : false;
+            flag = i > 5 && policy.v5 === rule[5] ? true : false;
+            flag = i > 4 && policy.v4 === rule[4] ? true : false;
+            flag = i > 3 && policy.v3 === rule[3] ? true : false;
+            flag = i > 2 && policy.v2 === rule[2] ? true : false;
+            flag = i > 1 && policy.v0 === rule[1] ? true : false;
             return flag;
         });
-        if(policyIndex!==-1){
-            return policies.splice(policyIndex,1);
+        if (policyIndex !== -1) {
+            return policies.splice(policyIndex, 1);
         }
         return [];
     }
-    constructor(options: Object) {
-        this.createClient(options);
+
+    constructor(options: IConnectionOptions) {
+        this.redisInstance = redis.createClient(
+            {
+                ...options,
+                ...this.deliveredOptions,
+            },
+        );
     }
-    static async newAdapter(options: Object) {
+
+    static async newAdapter(options: IConnectionOptions) {
         const adapter = new NodeRedisAdapter(options);
         await new Promise(resolve => adapter.redisInstance.on('connect', resolve));
         return adapter;
     }
+
     /**
      * Adapter Methods
      */
 
-    async loadPolicy(model) {
-        this.redisInstance.GET("policies", (err, policies) => {
-            var AdapterRef=this;
+    loadPolicy(model) {
+        this.redisInstance.get("policies", (err, policies) => {
+            var AdapterRef = this;
             console.log("Loading Policies...\n", policies);
             if (!policies) {
                 let tempPolicies = [];
@@ -166,11 +172,10 @@ export class NodeRedisAdapter {
                 return new Error("No Policies Found");
             }
             if (!err) {
-                policies=JSON.parse(policies);
-                this.policies=policies;//For add and remove policies methods
-                console.log(policies, typeof policies);
-                policies.forEach(function (policy,index) {
-                    console.log(policy)
+                policies = JSON.parse(policies);
+                this.policies = policies;//For add and remove policies methods
+                console.log(policies);
+                policies.forEach(function (policy, index) {
                     AdapterRef.loadPolicyLine(policy, model);
                 });
                 console.log("Policies are loaded");
@@ -179,6 +184,7 @@ export class NodeRedisAdapter {
             }
         });
     }
+
     async savePolicy(model) {
         const policyRuleAST = model.model.get("p");
         const groupingPolicyAST = model.model.get("g");
@@ -206,14 +212,15 @@ export class NodeRedisAdapter {
     }
 
     async removePolicy(sec, ptype, rule) {
-        let result=this.reducePolicies(this.policies, ptype,rule);
+        let result = this.reducePolicies(this.policies, ptype, rule);
         //the modified policies
-        if(result.length){ //if length>0
-            this.policies=result;
+        if (result.length) { //if length>0
+            this.policies = result;
             //Store in Redis
             this.storePolicies(this.policies);
-        }else{
-            console.log("No Policy found");
+        } else {
+            // console.IN("No Policy found");
+            throw new Error("No Policy Found");
         }
     }
 
